@@ -4,3 +4,4 @@ slack-sdk
 python-dotenv
 sqlalchemy
 psycopg2-binary
+gunicorn
