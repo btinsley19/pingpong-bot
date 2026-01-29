@@ -564,20 +564,26 @@ def handle_score_submission(ack, body, client):
                 submitted_by=submitted_by,
             )
 
-            winner_line = ""
+            # Format: "user1 defeated user2 21 - 12"
             if winner:
-                winner_line = f"\n*Winner:* <@{winner}>"
+                if winner == match_data["challenger"]:
+                    winner_name = match_data["challenger"]
+                    loser_name = match_data["opponent"]
+                    winner_score = challenger_score
+                    loser_score = opponent_score
+                else:
+                    winner_name = match_data["opponent"]
+                    loser_name = match_data["challenger"]
+                    winner_score = opponent_score
+                    loser_score = challenger_score
+                message = f"🏓 <@{winner_name}> defeated <@{loser_name}> {winner_score} - {loser_score}"
             else:
-                winner_line = "\n*Result:* Tie game"
+                # Tie game
+                message = f"🏓 <@{match_data['challenger']}> tied <@{match_data['opponent']}> {challenger_score} - {opponent_score}"
 
             client.chat_postMessage(
                 channel=channel,
-                text=(
-                    f"🏓 Match Result: <@{match_data['challenger']}> vs <@{match_data['opponent']}>\n"
-                    f"*Scores:* <@{match_data['challenger']}> {challenger_score} – "
-                    f"<@{match_data['opponent']}> {opponent_score}"
-                    f"{winner_line}"
-                )
+                text=message
             )
             delete_match(match_id)
         except SlackApiError as e:
