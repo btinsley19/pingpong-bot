@@ -405,6 +405,28 @@ def open_score_modal(ack, body, client):
         return
 
     submitting_user = body["user"]["id"]
+    # Only the two players can submit a score (important for public channels)
+    if submitting_user not in (match_data["challenger"], match_data["opponent"]):
+        try:
+            client.chat_postEphemeral(
+                channel=match_data["channel"],
+                user=submitting_user,
+                text="❌ Only the two players in this match can submit the score.",
+            )
+        except SlackApiError as e:
+            print(f"DEBUG: chat_postEphemeral failed: {e.response.data}")
+            # Fallback: DM the user (if possible)
+            try:
+                dm = client.conversations_open(users=submitting_user)
+                dm_channel = dm["channel"]["id"]
+                client.chat_postMessage(
+                    channel=dm_channel,
+                    text="❌ Only the two players in this match can submit the score.",
+                )
+            except Exception as ee:
+                print(f"DEBUG: DM fallback (non-player submit) failed: {ee}")
+        return
+
     # Determine who is "you" vs "opponent" for nicer labels
     if submitting_user == match_data["challenger"]:
         your_label = "Your score"
@@ -500,6 +522,20 @@ def handle_score_submission(ack, body, client):
 
     match_data = get_match(match_id)
     if match_data:
+        submitting_user = body["user"]["id"]
+        if submitting_user not in (match_data["challenger"], match_data["opponent"]):
+            # Should be blocked earlier, but keep a safety net.
+            try:
+                dm = client.conversations_open(users=submitting_user)
+                dm_channel = dm["channel"]["id"]
+                client.chat_postMessage(
+                    channel=dm_channel,
+                    text="❌ Only the two players in this match can submit the score.",
+                )
+            except Exception as e:
+                print(f"DEBUG: non-player submit safety net failed: {e}")
+            return
+
         channel = match_data["channel"]
 
         try:
