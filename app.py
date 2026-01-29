@@ -347,13 +347,26 @@ def handle_pick_opponent(ack, body, client):
 
 
 @bolt_app.action("accept_match")
-def accept_match(ack, body, respond):
+def accept_match(ack, body, respond, client):
     ack()
     match_id = body["actions"][0]["value"]
 
     match_data = get_match(match_id)
     if not match_data:
         respond("❌ Match not found or expired.")
+        return
+
+    clicking_user = body["user"]["id"]
+    # Only the opponent can accept
+    if clicking_user != match_data["opponent"]:
+        try:
+            client.chat_postEphemeral(
+                channel=match_data["channel"],
+                user=clicking_user,
+                text="❌ Only the challenged opponent can accept or decline this match.",
+            )
+        except SlackApiError as e:
+            print(f"DEBUG: chat_postEphemeral (accept_match) failed: {e.response.data}")
         return
 
     respond(
@@ -382,9 +395,28 @@ def accept_match(ack, body, respond):
 
 
 @bolt_app.action("decline_match")
-def decline_match(ack, body, respond):
+def decline_match(ack, body, respond, client):
     ack()
     match_id = body["actions"][0]["value"]
+
+    match_data = get_match(match_id)
+    if not match_data:
+        respond("❌ Match not found or expired.")
+        return
+
+    clicking_user = body["user"]["id"]
+    # Only the opponent can decline
+    if clicking_user != match_data["opponent"]:
+        try:
+            client.chat_postEphemeral(
+                channel=match_data["channel"],
+                user=clicking_user,
+                text="❌ Only the challenged opponent can accept or decline this match.",
+            )
+        except SlackApiError as e:
+            print(f"DEBUG: chat_postEphemeral (decline_match) failed: {e.response.data}")
+        return
+
     delete_match(match_id)
     respond("❌ Match declined.")
 
@@ -439,12 +471,19 @@ def open_score_modal(ack, body, client):
         your_label = "Your score"
         opponent_label = "Opponent's score"
 
+    # Capture the message we are responding to so we can remove the button after submission
+    channel_from_body = (body.get("channel") or {}).get("id")
+    message_ts = (body.get("message") or {}).get("ts")
+    private_metadata = match_id
+    if channel_from_body and message_ts:
+        private_metadata = f"{match_id}|{channel_from_body}|{message_ts}"
+
     client.views_open(
         trigger_id=body["trigger_id"],
         view={
             "type": "modal",
             "callback_id": "submit_score",
-            "private_metadata": match_id,
+            "private_metadata": private_metadata,
             "title": {"type": "plain_text", "text": "Submit Score"},
             "submit": {"type": "plain_text", "text": "Submit"},
             "close": {"type": "plain_text", "text": "Cancel"},
@@ -518,7 +557,12 @@ def handle_score_submission(ack, body, client):
         )
         return
 
-    match_id = body["view"]["private_metadata"]
+    private_metadata = body["view"]["private_metadata"]
+    # Format: "match_id|channel_id|message_ts" (channel_id/message_ts optional for backwards compatibility)
+    parts = (private_metadata or "").split("|")
+    match_id = parts[0]
+    source_channel_id = parts[1] if len(parts) > 1 else None
+    source_message_ts = parts[2] if len(parts) > 2 else None
 
     match_data = get_match(match_id)
     if match_data:
@@ -586,6 +630,26 @@ def handle_score_submission(ack, body, client):
                 text=message
             )
             delete_match(match_id)
+
+            # Remove/disable the submit button by updating the original message (if we have it)
+            if source_channel_id and source_message_ts:
+                try:
+                    client.chat_update(
+                        channel=source_channel_id,
+                        ts=source_message_ts,
+                        text="🏓 Score submitted.",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"✅ Score submitted for <@{match_data['challenger']}> vs <@{match_data['opponent']}>."
+                                },
+                            }
+                        ],
+                    )
+                except SlackApiError as e:
+                    print(f"DEBUG: chat_update (remove submit button) failed: {e.response.data}")
         except SlackApiError as e:
             err = (e.response.data or {}).get("error")
             print(f"DEBUG: chat_postMessage (score) failed: {e.response.data}")
