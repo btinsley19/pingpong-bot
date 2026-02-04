@@ -24,7 +24,7 @@ handler = SlackRequestHandler(bolt_app)
 DEFAULT_DB_PATH = os.environ.get("PINGPONG_DB_PATH", "pingpong.db")
 DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DEFAULT_DB_PATH}")
 
-engine = create_engine(DATABASE_URL, future=True)
+engine = create_engine(DATABASE_URL, future=True, pool_pre_ping=True)
 
 
 def init_db():
